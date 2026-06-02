@@ -1,52 +1,51 @@
-# Data Hop Firewall: Intelligent L7 Data Redaction for Envoy Proxy
+# 🛡️ Data Hop Firewall (Envoy Wasm Filter)
 
-**A high-performance WebAssembly (Wasm) filter written in Rust for Envoy Proxy, designed to prevent sensitive data leakage and enforce Zero-Trust data contracts at the network edge.**
+> **Zero-Trust Data Flow Control & L7 DLP for Microservices.**
+
+### 🔬 Researcher's Note
+> **Focus:** Vulnerability Research & Security Architecture.
+>
+> The core value of this project lies in the architectural research. The conceptualization, Zero-Trust security architecture, and identification of the attack vectors (React2Shell, CWE-209, Information Disclosure) are entirely my own design. Because my focus is vulnerability research and system internals rather than day-to-day Rust engineering, the actual Rust/WASM implementation was executed with AI assistance under my direct technical guidance. The true asset presented here is the identification of a structural flaw in a production environment and the engineering of an infrastructure-level mitigation.
 
 ---
 
-## 🛡️ Motivation: The API Over-fetching Problem
+## 📖 The Problem: API Over-fetching & CWE-209
+In modern microservice architectures, **Data Bleed** and **API Over-fetching** are critical vulnerabilities. Backends often return massive database objects, relying on the frontend to filter sensitive fields. This inadvertently exposes sensitive PII, internal tokens, and stack traces to the network layer.
 
-Modern microservice architectures often suffer from **API Over-fetching** (CWE-201/CWE-209), where backends return complete database objects to the frontend, relying on the client to filter sensitive fields. This leads to accidental exposure of:
+### 🚩 Case Study: Financial Gateway Error Shielding
+During an analysis of a production banking environment, a specific sequence (idle session + forced refresh) caused the ASP.NET backend to crash. Instead of a generic error, it returned a 500 Internal Server Error exposing:
+* Physical server directory paths.
+* IIS and .NET versions.
+* `web.config` manipulation suggestions.
 
-* Internal system paths and stack traces (Information Disclosure).
-* Hashed passwords or internal service tokens.
-* Sensitive PII (Personally Identifiable Information).
+This is a classic **CWE-209 (Information Exposure Through an Error Message)**.
 
-**Data Hop Firewall** moves the responsibility of data redaction from the application logic to the **Infrastructure Layer**, ensuring that sensitive data never leaves the internal network.
+## 🏗️ The Solution: "The Whisper Pipe" Architecture
+I designed the **Data Hop Firewall** to shift sanitization responsibility from the application layer directly to the Envoy Proxy (Infrastructure Layer). 
 
-## 🚀 Technical Highlights
+Using a novel concept called **Logical Data TTL**, this Wasm filter actively enforces Data Contracts:
+1. **Hop 0 (DB -> Backend):** Backend retrieves the full user object.
+2. **Hop 1 (Backend -> Frontend):** Envoy Proxy intercepts the response.
+3. **Interception & Redaction:** Recognizing the data boundary (via headers like `X-Data-TTL`), it surgically removes sensitive fields from the JSON payload in-memory or replaces raw stack traces with sanitized JSON.
+4. **Delivery:** The Frontend receives a safe payload, completely blind to the original sensitive data.
 
-* **Engineered in Rust:** Leverages memory safety and zero-cost abstractions for high-performance L7 inspection.
-* **WebAssembly (Wasm) Runtime:** Runs in a secure sandbox within Envoy, allowing for hot-reloading without proxy downtime.
-* **Recursive JSON Redaction:** Deep-scans response payloads to identify and mask sensitive keys based on logical rules.
-* **Fail-Closed Security:** Implements a strict security posture; if a payload cannot be safely parsed or inspected, the request is dropped to prevent potential leakage.
+## ✨ Core Capabilities
+* **Engineered in Rust & Wasm:** Memory-safe, zero-cost abstractions, running in a secure sandbox within Envoy for hot-reloading.
+* **Recursive JSON Redaction:** Deep-scans response payloads to identify and mask sensitive keys (`password`, `ssn`, `internal_token`).
+* **Fail-Closed Security:** Operates on a strict zero-trust model. If JSON parsing fails or serialization panics, the payload is completely dropped to prevent leakage.
 
-## 🏗️ Architecture
-
-The filter intercepts HTTP responses at the Envoy Gateway. It monitors for specific triggers:
-
-1. **Logical Data TTL:** Detects custom headers (e.g., `X-Data-TTL`) to initiate redaction.
-2. **Global Masking:** Automatically masks common sensitive fields (passwords, secret keys) across all endpoints.
-3. **Error Shielding:** Intercepts 5xx responses to prevent raw stack traces and server configuration details (like `web.config` snippets) from reaching the end-user.
-
-## 🧪 Case Study: Server Error Masking
-
-In recent observations of financial application gateways, it was identified that idle sessions combined with forced cache refreshes could trigger raw ASP.NET error pages. These pages expose internal server paths and configuration logic.
-
-**Data Hop Firewall** mitigates this by identifying 5xx status codes and replacing the verbose system-generated HTML with a sanitized, generic JSON response, effectively hardening the application's surface area.
-
-## 🛠️ Getting Started
+## 🛠️ Build Instructions
 
 ### Prerequisites
+* [Rust Toolchain](https://rustup.rs/) (latest stable)
+* Envoy Proxy (v1.28+)
 
-* [Envoy Proxy](https://www.envoyproxy.io/) v1.28+
-* [Rust](https://www.rust-lang.org/) with `wasm32-wasi` target.
+### Compilation
+Add the WebAssembly compilation target to your Rust environment:
+(bash)
+rustup target add wasm32-unknown-unknown
+cargo build --target wasm32-unknown-unknown --release
 
-### Build & Deploy
+The compiled binary will be generated at: target/wasm32-unknown-unknown/release/data_hop_firewall.wasm
 
-```bash
-cargo build --target wasm32-wasi --release
-
-```
-
-Configure your `envoy.yaml` to include the compiled `.wasm` filter in the HTTP filter chain.
+Developed by Shay Mordechai | Vulnerability Researcher & Systems Architect
